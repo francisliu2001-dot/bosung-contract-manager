@@ -9,10 +9,10 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     backup_dir: str = "./backups"
     max_upload_mb: int = 25
+    maintenance_interval_seconds: int = 3600
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

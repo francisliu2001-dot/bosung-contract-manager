@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from pydantic import BaseModel, Field
 
@@ -9,10 +10,12 @@ class ContractIn(BaseModel):
     business_type_id: int; file_type_id: int; primary_owner_id: int | None = None
     signing_month: str = Field(pattern=r"^\d{4}$"); region_id: int; client_company_name: str
     project_short_name: str; contract_title: str; amount: Decimal | None = None; notes: str | None = None
+    signing_date: date | None = None; service_start_date: date | None = None; service_end_date: date | None = None
 
 class ContractUpdate(BaseModel):
     project_short_name: str | None = None; contract_title: str | None = None
     amount: Decimal | None = None; notes: str | None = None; status: str | None = None
+    signing_date: date | None = None; service_start_date: date | None = None; service_end_date: date | None = None
 
 class CoreContractUpdate(BaseModel):
     business_type_id: int | None = None; file_type_id: int | None = None

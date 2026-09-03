@@ -16,12 +16,12 @@ def seed():
                 if not db.scalar(select(model).where(model.code == code)): db.add(model(code=code, name=name))
         for name, code in REGIONS.items():
             if not db.scalar(select(Region).where(Region.code == code)): db.add(Region(chinese_name=name, code=code))
-        for code in ("KR4A", "QKWN"):
-            if not db.scalar(select(AnonymousCode).where(AnonymousCode.code == code)): db.add(AnonymousCode(code=code, status=CodeStatus.used))
+        for allocation_order, code in enumerate(("KR4A", "QKWN"), start=1):
+            historical = db.scalar(select(AnonymousCode).where(AnonymousCode.code == code))
+            if not historical: db.add(AnonymousCode(code=code, status=CodeStatus.used, allocation_order=allocation_order))
         username, password = os.getenv("ADMIN_USERNAME"), os.getenv("ADMIN_PASSWORD")
         if username and password and not db.scalar(select(User).where(User.username == username)):
             db.add(User(username=username, display_name="管理员", password_hash=hash_password(password), role=Role.admin, salesperson_code=os.getenv("ADMIN_SALESPERSON_CODE", "ADMIN")))
         db.commit()
 
 if __name__ == "__main__": seed()
-

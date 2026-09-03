@@ -4,26 +4,27 @@
 {% block body %}
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
-    <a href="/" class="brand-link" aria-label="铂晟首页"><img src="{{ url_for('static', path='/images/bosheng-logo.png') }}" alt="BOSHENG 铂晟"></a>
+    <a href="/" class="brand-link" aria-label="铂晟首页"><img src="{{ url_for('static', path='/images/bosheng-logo.png') }}" alt="BOSHENG 铂晟"><span>Contract Manager</span></a>
     <nav aria-label="主要导航">
       <a class="nav-link active" href="/">合同总览</a>
       <a class="nav-link" href="/app/contracts">合同档案</a>
+      <a class="nav-link" href="/app/contracts/new">新建合同</a>
       <a class="nav-link" href="#reminders">到期提醒</a>
-      {% if user.role.value == 'admin' %}<a class="nav-link" href="/docs">系统管理</a>{% endif %}
+      {% if user.role.value == 'admin' and not production %}<a class="nav-link" href="/docs">系统管理</a>{% endif %}
     </nav>
     <div class="sidebar-foot"><span>{{ user.display_name }}</span><small>{{ '管理员' if user.role.value == 'admin' else '普通成员' }}</small></div>
   </aside>
   <main class="main-area">
     <header class="topbar">
       <button class="menu-button" type="button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false">菜单</button>
-      <span class="organization">铂晟合同管理</span>
-      <form action="/logout" method="post"><button class="text-button" type="submit">退出</button></form>
+      <span class="organization">铂晟合同管理</span><details class="user-menu"><summary><strong>{{ user.display_name }}</strong><span>{{ '管理员' if user.role.value == 'admin' else '普通成员' }}</span></summary><div><a href="/app/account">我的账号</a><a href="/app/account#password">修改密码</a><form action="/logout" method="post"><button>退出</button></form></div></details>
     </header>
     <div class="content-frame">
       <section class="page-heading">
         <div><h1>合同总览</h1><p>查看当前合同状态与近期事项。</p></div>
         <a class="button button-primary" href="/app/contracts/new">新建合同</a>
       </section>
+      {% if code_stats %}<section class="code-summary" aria-label="匿名码统计"><div><strong>匿名码</strong><span>{{ code_stats.allocated }} / {{ code_stats.total }} 已分配</span></div><span>剩余 {{ code_stats.unused }}</span><span>当前第 {{ code_stats.allocation_order }} 个</span></section>{% endif %}
       <section class="metric-grid" aria-label="合同统计">
         <article><span>全部合同</span><strong>{{ stats.total }}</strong><small>当前可见范围</small></article>
         <article><span>有效合同</span><strong>{{ stats.active }}</strong><small>已签署及履约中</small></article>
@@ -34,7 +35,7 @@
         <div class="panel-heading"><h2>到期提醒</h2><span>未来 30 天</span></div>
         {% if reminders %}
         <div class="reminder-list">
-          {% for contract in reminders %}<a href="/contracts/{{ contract.id }}"><strong>{{ contract.contract_title }}</strong><code>{{ contract.current_contract_number }}</code><span>{{ contract.service_end_date }}</span><b>{{ (contract.service_end_date - today).days if today else '' }}</b></a>{% endfor %}
+          {% for item in reminders %}<div class="reminder-row"><a href="/app/contracts/record/{{ item.contract.id }}"><strong>{{ item.contract.contract_title }}</strong><code>{{ item.contract.current_contract_number }}</code><span>{{ item.contract.service_end_date }}</span><b>{{ item.threshold }} 天提醒 · 剩 {{ item.days }} 天</b></a><form action="/app/reminders/{{ item.contract.id }}/{{ item.threshold }}/read" method="post"><button class="text-action">标为已读</button></form></div>{% endfor %}
         </div>
         {% else %}<div class="empty-state"><strong>近期没有到期合同</strong><span>新的到期事项会显示在这里。</span></div>{% endif %}
       </section>
@@ -42,7 +43,7 @@
         <div class="panel-heading"><h2>合同一览</h2><a href="/app/contracts">查看全部</a></div>
         {% if contracts %}
         <div class="table-wrap"><table><thead><tr><th>合同名称</th><th>合同编号</th><th>项目简称</th><th>状态</th><th>服务结束</th><th><span class="sr-only">操作</span></th></tr></thead>
-        <tbody>{% for contract in contracts %}<tr><td><strong>{{ contract.contract_title }}</strong></td><td><code>{{ contract.current_contract_number }}</code></td><td>{{ contract.project_short_name }}</td><td><span class="status status-{{ contract.status.value }}">{{ status_labels[contract.status.value] }}</span></td><td>{{ contract.service_end_date or '未设置' }}</td><td><a href="/contracts/{{ contract.id }}">查看</a></td></tr>{% endfor %}</tbody></table></div>
+        <tbody>{% for contract in contracts %}<tr><td><strong>{{ contract.contract_title }}</strong></td><td><a class="contract-number" href="/app/contracts/record/{{ contract.id }}">{{ contract.current_contract_number }}</a></td><td>{{ contract.project_short_name }}</td><td><span class="status status-{{ contract.status.value }}">{{ status_labels[contract.status.value] }}</span></td><td>{{ contract.service_end_date or '未设置' }}</td><td><a href="/app/contracts/record/{{ contract.id }}">查看</a></td></tr>{% endfor %}</tbody></table></div>
         {% else %}<div class="empty-state"><strong>还没有合同</strong><span>生成第一份正式合同编号后，记录会显示在这里。</span><a class="button button-secondary" href="/app/contracts/new">建立合同</a></div>{% endif %}
       </section>
     </div>

@@ -1,5 +1,39 @@
-{% extends "base.html" %}{% block title %}新建合同 | 铂晟{% endblock %}{% block body_class %}app-page{% endblock %}
-{% block body %}<div class="app-shell"><aside class="sidebar" id="sidebar"><a href="/" class="brand-link"><img src="{{ url_for('static',path='/images/bosheng-logo.png') }}" alt="BOSHENG 铂晟"></a><nav aria-label="主要导航"><a class="nav-link" href="/">合同总览</a><a class="nav-link active" href="/app/contracts">合同档案</a></nav><div class="sidebar-foot"><span>{{ user.display_name }}</span><small>{{ '管理员' if user.role.value == 'admin' else '普通成员' }}</small></div></aside>
-<main class="main-area"><header class="topbar"><button class="menu-button" type="button" aria-controls="sidebar">菜单</button><span class="organization">铂晟合同管理</span><a class="text-button" href="/app/contracts">取消</a></header><div class="content-frame form-frame"><section class="page-heading"><div><h1>新建合同</h1><p>确认后系统将分配匿名码并生成正式编号。</p></div></section>
-<form class="contract-form panel" method="post" onsubmit="return confirm('请确认核心编号字段无误。确认后匿名码将被永久占用。')"><fieldset><legend>编号信息</legend><div class="form-grid"><label>业务类型<select name="business_type_id" required>{% for item in business_types %}<option value="{{ item.id }}">{{ item.code }} {{ item.name }}</option>{% endfor %}</select></label><label>文件类型<select name="file_type_id" required>{% for item in file_types %}<option value="{{ item.id }}">{{ item.code }} {{ item.name }}</option>{% endfor %}</select></label>{% if user.role.value == 'admin' %}<label>主负责人<select name="primary_owner_id" required>{% for item in owners %}<option value="{{ item.id }}">{{ item.display_name }} {{ item.salesperson_code }}</option>{% endfor %}</select></label>{% endif %}<label>签署年月<input name="signing_month" placeholder="YYMM，例如 2609" pattern="[0-9]{4}" required></label><label>地区<select name="region_id" required>{% for item in regions %}<option value="{{ item.id }}">{{ item.chinese_name }} {{ item.code }}</option>{% endfor %}</select></label></div></fieldset>
-<fieldset><legend>合同资料</legend><div class="form-grid"><label class="span-2">甲方公司全称<input name="client_company_name" required></label><label>项目简称<input name="project_short_name" required></label><label>合同标题<input name="contract_title" required></label><label>合同金额<input name="amount" type="number" min="0" step="0.01" inputmode="decimal"></label><label class="span-2">备注<textarea name="notes" rows="4"></textarea></label></div></fieldset><div class="form-actions"><a href="/app/contracts">返回</a><button class="button button-primary" type="submit">确认并生成编号</button></div></form></div></main></div>{% endblock %}
+{% extends "base.html" %}
+{% block title %}新建合同 | 铂晟{% endblock %}
+{% block body_class %}app-page{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <a href="/" class="brand-link"><img src="{{ url_for('static',path='/images/bosheng-logo.png') }}" alt="BOSHENG 铂晟"><span>Contract Manager</span></a>
+    <nav aria-label="主要导航"><a class="nav-link" href="/">合同总览</a><a class="nav-link" href="/app/contracts">合同档案</a><a class="nav-link active" href="/app/contracts/new">新建合同</a><a class="nav-link" href="/#reminders">到期提醒</a>{% if user.role.value == 'admin' and not production %}<a class="nav-link" href="/docs">系统管理</a>{% endif %}</nav>
+  </aside>
+  <main class="main-area">
+    <header class="topbar"><button class="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">菜单</button><span class="organization">铂晟合同管理</span><details class="user-menu"><summary><strong>{{ user.display_name }}</strong><span>{{ '管理员' if user.role.value == 'admin' else '普通成员' }}</span></summary><div><a href="/app/account">我的账号</a><a href="/app/account#password">修改密码</a><form action="/logout" method="post"><button>退出</button></form></div></details></header>
+    <div class="content-frame form-frame">
+      <section class="page-heading"><div><h1>新建合同</h1><p>先核对编号核心字段，再生成不可复用的正式编号。</p></div></section>
+      {% if error %}<div class="form-error" role="alert">{{ error }}</div>{% endif %}
+      <form class="contract-form panel" method="post" id="contract-create-form">
+        <input type="hidden" name="confirmed" id="confirmed" value="">
+        <fieldset><legend>编号信息</legend><div class="form-grid">
+          <label>业务类型<select name="business_type_id" id="business-type" required>{% for item in business_types %}<option value="{{ item.id }}" data-code="{{ item.code }}" {% if values.business_type_id|string == item.id|string %}selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select></label>
+          <label>文件类型<select name="file_type_id" id="file-type" required>{% for item in file_types %}<option value="{{ item.id }}" data-code="{{ item.code }}" {% if values.file_type_id|string == item.id|string %}selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select></label>
+          {% if user.role.value == 'admin' %}<label>主负责人<select name="primary_owner_id" id="primary-owner" required>{% for item in owners %}<option value="{{ item.id }}" data-code="{{ item.salesperson_code }}" {% if values.primary_owner_id|string == item.id|string %}selected{% endif %}>{{ item.display_name }} {{ item.salesperson_code }}</option>{% endfor %}</select></label>{% else %}<label>主负责人<input value="{{ user.display_name }} {{ user.salesperson_code }}" data-owner-code="{{ user.salesperson_code }}" disabled><small>普通成员只能以本人作为主负责人</small></label>{% endif %}
+          <label>签署年月<input name="signing_month" id="signing-month" type="month" value="{{ values.signing_month or '' }}" required></label>
+          <label>地区<select name="region_id" id="region" required>{% for item in regions %}<option value="{{ item.id }}" data-code="{{ item.code }}" {% if values.region_id|string == item.id|string %}selected{% endif %}>{{ item.chinese_name }}{% if item.code != 'QT' %} {{ item.code }}{% endif %}</option>{% endfor %}</select></label>
+          <label class="span-2 custom-region" id="custom-region-wrap" hidden>新增地区<input name="custom_region" id="custom-region" value="{{ values.custom_region or '' }}" placeholder="请输入地区及拼音首字母，例如：上海 SH"><small>地区代码只使用大写英文字母，保存后将加入共享地区选项。</small></label>
+        </div></fieldset>
+        <section class="number-preview" aria-live="polite"><span>合同编号预览</span><code id="number-preview">BS-__________-__</code><small>匿名识别码将在确认生成时由系统分配。</small></section>
+        <fieldset><legend>合同资料</legend><div class="form-grid">
+          <label class="span-2">甲方公司全称<input name="client_company_name" value="{{ values.client_company_name or '' }}" list="client-companies" autocomplete="organization" required><datalist id="client-companies">{% for client in clients %}<option value="{{ client.full_name }}">{% endfor %}</datalist><small>选择已有公司，或输入完整名称建立新公司。</small></label>
+          <label>项目简称<input name="project_short_name" value="{{ values.project_short_name or '' }}" required></label><label>合同标题<input name="contract_title" value="{{ values.contract_title or '' }}" required></label>
+          <label>合同金额<input name="amount" value="{{ values.amount or '' }}" inputmode="decimal" placeholder="例如：20000.00"></label><label>签署日期<input name="signing_date" type="date" value="{{ values.signing_date or '' }}"></label>
+          <label>服务开始日期<input name="service_start_date" type="date" value="{{ values.service_start_date or '' }}"></label><label>服务结束日期<input name="service_end_date" type="date" value="{{ values.service_end_date or '' }}"><small>用于 30、15、7 天到期提醒。</small></label>
+          <label class="span-2">备注<textarea name="notes" rows="4">{{ values.notes or '' }}</textarea></label>
+        </div></fieldset>
+        <div class="form-actions"><a href="/app/contracts">取消</a><button class="button button-primary" type="submit">生成正式编号</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+<dialog class="confirm-dialog" id="number-confirm-dialog" aria-labelledby="confirm-title"><form method="dialog"><h2 id="confirm-title">确认生成正式编号</h2><p>系统即将分配正式合同编号。匿名识别码一经使用将被永久占用，即使合同随后取消，也不会回到可用码池。</p><p>请再次检查业务类型、文件类型、主负责人、签署年月和地区。</p><code id="confirm-number-preview"></code><div class="dialog-actions"><button class="button button-secondary" value="cancel">返回检查</button><button class="button button-primary" id="confirm-generate" value="confirm">确认生成正式编号</button></div></form></dialog>
+{% endblock %}

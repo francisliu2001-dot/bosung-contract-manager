@@ -141,11 +141,22 @@ class ContractFile(Base):
     storage_path: Mapped[str] = mapped_column(String(500))
     mime_type: Mapped[str] = mapped_column(String(100))
     size: Mapped[int]
+    notes: Mapped[str | None] = mapped_column(Text)
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ReminderRead(Base):
+    __tablename__ = "reminder_reads"
+    __table_args__ = (UniqueConstraint("contract_id", "user_id", "threshold_days", name="uq_reminder_read"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    threshold_days: Mapped[int]
+    read_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class AuditLog(Base):

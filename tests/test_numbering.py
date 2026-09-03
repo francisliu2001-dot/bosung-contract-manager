@@ -1,5 +1,7 @@
 import re
+from concurrent.futures import ThreadPoolExecutor
 import pytest
+from sqlalchemy.orm import sessionmaker
 from app.models import AnonymousCode, BusinessType, CodeStatus, ContractCollaborator, FileType, Region, RequestStatus, Role, User
 from app.numbering import ALPHABET, claim_code, format_number, generate_pool
 from app.security import hash_password
@@ -20,6 +22,16 @@ def test_claim_refills_and_allocation_order(db):
     first=claim_code(db); db.commit(); second=claim_code(db); db.commit()
     assert first.status == CodeStatus.used and (first.allocation_order, second.allocation_order) == (1,2)
     assert db.query(AnonymousCode).filter_by(status=CodeStatus.unused).count() >= 48
+
+def test_concurrent_claims_do_not_duplicate(db):
+    generate_pool(db, 20); db.commit()
+    factory = sessionmaker(db.bind, expire_on_commit=False)
+    def allocate():
+        with factory() as session:
+            code = claim_code(session); session.commit(); return code.code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        codes = list(pool.map(lambda _: allocate(), range(2)))
+    assert len(set(codes)) == 2
 
 def test_number_format():
     assert format_number("INT","HT","TY","2609","QKWN","ZS") == "BS-INTHTTY2609QKWN-ZS"
