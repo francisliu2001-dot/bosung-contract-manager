@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}登录 | 铂晟合同管理{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block body %}
+<main class="login-shell">
+  <section class="login-brand" aria-label="铂晟合同管理系统">
+    <img src="{{ url_for('static', path='/images/bosheng-logo.png') }}" alt="BOSHENG 铂晟" class="login-logo">
+    <div class="login-message">
+      <p class="brand-kicker">合同管理系统</p>
+      <h1>让每一份合同<br>都有清晰的来路。</h1>
+      <p>编号、权限、文件与历史记录集中管理。</p>
+    </div>
+  </section>
+  <section class="login-panel">
+    <form method="post" action="/login" class="login-form">
+      <header>
+        <p class="section-label">内部系统</p>
+        <h2>欢迎回来</h2>
+        <p>使用管理员分配的账号登录。</p>
+      </header>
+      {% if error %}<div class="form-error" role="alert">{{ error }}</div>{% endif %}
+      <label>登录名<input name="username" autocomplete="username" required autofocus></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="button button-primary" type="submit">登录系统</button>
+      <p class="privacy-note">合同资料仅供授权成员访问</p>
+    </form>
+  </section>
+</main>
+{% endblock %}

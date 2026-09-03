@@ -1,6 +1,6 @@
 # Bosung Contract Manager
 
-铂晟内部合同编码与档案管理系统。当前实现 V1 Phase 0–4：FastAPI/SQLAlchemy/Alembic 基础、账号登录、编码字典、匿名码池及合同编号生成。
+铂晟内部合同编码与档案管理系统。当前实现账号登录、权限隔离、编码字典、匿名码池、合同编号生成、合同档案、协作审批及受保护 PDF 文件管理，并提供响应式中文管理界面。
 
 ## 本地启动
 
@@ -15,7 +15,7 @@ python -m app.seed
 uvicorn app.main:app --reload
 ```
 
-API 文件位于 `/docs`。建立合同的 `POST /contracts` 即视为使用者已完成二次确认；匿名码会在同一个数据库交易中领取并永久占用。
+浏览器打开 `/login` 使用管理界面；API 文件位于 `/docs`。通过界面确认新建合同，或调用 `POST /contracts`，即视为使用者已完成二次确认；匿名码会在同一个数据库交易中领取并永久占用。
 
 ## 测试
 

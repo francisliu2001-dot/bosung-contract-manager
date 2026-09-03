@@ -13,4 +13,6 @@ dist/
 uploads/
 backups/
 data/
+.impeccable/
+assets/plates/
 .idea/

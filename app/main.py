@@ -1,14 +1,16 @@
 from pathlib import Path
 from uuid import uuid4
-from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .database import get_db
 from datetime import datetime, timezone
 from fastapi import status
 from .config import get_settings
-from .models import BusinessType, CollaborationRequest, Contract, ContractFile, ContractStatus, FileCategory, FileType, Region, Role, User
+from .models import BusinessType, ClientCompany, CollaborationRequest, Contract, ContractFile, ContractStatus, FileCategory, FileType, Region, Role, User
 from .schemas import (CollaborationRequestIn, CollaborationReviewIn, ContractIn, ContractUpdate,
                       CoreContractUpdate, DictionaryIn, LoginIn, RegionIn, UserIn)
 from .security import hash_password, make_session, read_session, verify_password
@@ -16,6 +18,9 @@ from .services import (audit, can_access_contract, create_contract, renumber_con
                        request_collaboration, review_collaboration, set_collaborator, visible_contracts)
 
 app = FastAPI(title="Bosung Contract Manager", version="0.1.0")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/assets", StaticFiles(directory="assets"), name="assets")
+templates = Jinja2Templates(directory="app/templates")
 
 def current_user(session: str | None = Cookie(None), db: Session = Depends(get_db)) -> User:
     user = db.get(User, read_session(session)) if session else None
@@ -28,6 +33,93 @@ def admin(user: User = Depends(current_user)) -> User:
 
 @app.get("/health")
 def health(): return {"status": "ok"}
+
+@app.get("/login", include_in_schema=False)
+def login_page(request: Request):
+    return templates.TemplateResponse(request=request, name="login.html", context={"error": None})
+
+@app.post("/login", include_in_schema=False)
+def login_form(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.username == username))
+    if not user or not user.is_active or not verify_password(password, user.password_hash):
+        return templates.TemplateResponse(request=request, name="login.html", context={"error": "账号或密码不正确"}, status_code=401)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie("session", make_session(user.id), httponly=True, secure=get_settings().app_env == "production", samesite="lax", max_age=43200)
+    return response
+
+@app.get("/", include_in_schema=False)
+def dashboard(request: Request, session: str | None = Cookie(None), db: Session = Depends(get_db)):
+    user = db.get(User, read_session(session)) if session else None
+    if not user or not user.is_active: return RedirectResponse("/login", status_code=303)
+    rows = db.scalars(visible_contracts(user).order_by(Contract.updated_at.desc()).limit(8)).all()
+    all_visible = db.scalars(visible_contracts(user)).all()
+    active_states = {ContractStatus.signed, ContractStatus.active}
+    stats = {"total": len(all_visible), "active": sum(c.status in active_states for c in all_visible),
+             "void": sum(c.status == ContractStatus.void for c in all_visible), "deleted": 0}
+    now = datetime.now(timezone.utc).date()
+    reminders = sorted([c for c in all_visible if c.service_end_date and 0 <= (c.service_end_date - now).days <= 30], key=lambda c: c.service_end_date)[:3]
+    status_labels = {"draft":"草稿","pending":"待签署","signed":"已签署","active":"履约中","completed":"已完成","terminated":"已终止","void":"已作废"}
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": user, "contracts": rows, "stats": stats, "reminders": reminders, "today": now, "status_labels": status_labels})
+
+def html_user(session: str | None, db: Session):
+    user = db.get(User, read_session(session)) if session else None
+    return user if user and user.is_active else None
+
+@app.get("/app/contracts", include_in_schema=False)
+def contracts_page(request: Request, q: str = "", session: str | None = Cookie(None), db: Session = Depends(get_db)):
+    user = html_user(session, db)
+    if not user: return RedirectResponse("/login", status_code=303)
+    query = visible_contracts(user)
+    if q.strip(): query = query.where(Contract.current_contract_number.contains(q.strip()) | Contract.contract_title.contains(q.strip()) | Contract.project_short_name.contains(q.strip()))
+    rows = db.scalars(query.order_by(Contract.updated_at.desc())).all()
+    labels = {"draft":"草稿","pending":"待签署","signed":"已签署","active":"履约中","completed":"已完成","terminated":"已终止","void":"已作废"}
+    return templates.TemplateResponse(request=request, name="contracts.html", context={"user":user,"contracts":rows,"q":q,"status_labels":labels})
+
+@app.get("/app/contracts/record/{contract_id}", include_in_schema=False)
+def contract_detail_page(contract_id: int, request: Request, session: str | None = Cookie(None), db: Session = Depends(get_db)):
+    user = html_user(session, db)
+    if not user: return RedirectResponse("/login", status_code=303)
+    contract = db.get(Contract, contract_id)
+    if not contract or not can_access_contract(db, user, contract, user.role == Role.admin):
+        raise HTTPException(404, "contract not found")
+    files = db.scalars(select(ContractFile).where(ContractFile.contract_id == contract.id, ContractFile.is_deleted.is_(False)).order_by(ContractFile.uploaded_at.desc())).all()
+    context = {"user": user, "contract": contract, "owner": db.get(User, contract.primary_owner_id),
+               "company": db.get(ClientCompany, contract.client_company_id), "files": files,
+               "status_labels": {"draft":"草稿","pending":"待签署","signed":"已签署","active":"履约中","completed":"已完成","terminated":"已终止","void":"已作废"},
+               "category_labels": {"original": "合同原件", "signed": "签署版本"}}
+    return templates.TemplateResponse(request=request, name="contract_detail.html", context=context)
+
+@app.get("/app/contracts/new", include_in_schema=False)
+def new_contract_page(request: Request, session: str | None = Cookie(None), db: Session = Depends(get_db)):
+    user = html_user(session, db)
+    if not user: return RedirectResponse("/login", status_code=303)
+    context={"user":user,"business_types":db.scalars(select(BusinessType).where(BusinessType.is_active.is_(True)).order_by(BusinessType.code)).all(),
+             "file_types":db.scalars(select(FileType).where(FileType.is_active.is_(True)).order_by(FileType.code)).all(),
+             "regions":db.scalars(select(Region).order_by(Region.chinese_name)).all(),"owners":db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all(),"error":None}
+    return templates.TemplateResponse(request=request,name="contract_new.html",context=context)
+
+@app.post("/app/contracts/new", include_in_schema=False)
+def new_contract_submit(request: Request, business_type_id: int = Form(...), file_type_id: int = Form(...), primary_owner_id: int | None = Form(None),
+                        signing_month: str = Form(...), region_id: int = Form(...), client_company_name: str = Form(...),
+                        project_short_name: str = Form(...), contract_title: str = Form(...), amount: str = Form(""), notes: str = Form(""),
+                        session: str | None = Cookie(None), db: Session = Depends(get_db)):
+    user = html_user(session, db)
+    if not user: return RedirectResponse("/login", status_code=303)
+    data={"business_type_id":business_type_id,"file_type_id":file_type_id,"primary_owner_id":primary_owner_id,"signing_month":signing_month,
+          "region_id":region_id,"client_company_name":client_company_name,"project_short_name":project_short_name,"contract_title":contract_title,
+          "amount":amount or None,"notes":notes or None}
+    if len(signing_month) != 4 or not signing_month.isdigit():
+        raise HTTPException(422, "签署年月必须是 4 位数字，例如 2609")
+    try: contract=create_contract(db,user,data)
+    except (ValueError,RuntimeError) as exc:
+        db.rollback(); raise HTTPException(422,str(exc))
+    return RedirectResponse(f"/app/contracts?q={contract.current_contract_number}",status_code=303)
+
+@app.post("/logout", include_in_schema=False)
+def logout_page():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("session")
+    return response
 
 @app.post("/auth/login")
 def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
