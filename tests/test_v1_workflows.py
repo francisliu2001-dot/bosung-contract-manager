@@ -10,7 +10,7 @@ from app.models import (AnonymousCode, BusinessType, ClientCompany, CodeStatus, 
                         ContractNumberHistory, ContractStatus, FileType, Region, ReminderRead,
                         Role, User)
 from app.security import hash_password, make_session
-from app.services import (complete_expired_contracts, create_contract, due_reminders,
+from app.services import (complete_expired_contracts, create_contract, due_reminders, reminder_items,
                           get_or_create_region, month_to_yymm, renumber_contract)
 
 
@@ -103,6 +103,23 @@ def test_reminder_thresholds_are_independently_readable(db):
     assert due_reminders(db, owner, today + timedelta(days=15))[0]["threshold"] == 15
     db.add(ReminderRead(contract_id=contract.id, user_id=owner.id, threshold_days=15)); db.commit()
     assert due_reminders(db, owner, today + timedelta(days=23))[0]["threshold"] == 7
+
+
+def test_reminders_page_is_permission_scoped_for_member_and_admin(db):
+    owner, outsider, admin, business, file_type, region = setup_records(db)
+    contract = create_contract(db, owner, contract_data(business, file_type, region, service_end_date=date.today() + timedelta(days=7)))
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        owner_client = TestClient(app); owner_client.cookies.set("session", make_session(owner.id))
+        owner_page = owner_client.get("/app/reminders")
+        assert owner_page.status_code == 200 and contract.current_contract_number in owner_page.text
+        assert 'href="/app/reminders"' in owner_client.get("/").text
+        outsider_client = TestClient(app); outsider_client.cookies.set("session", make_session(outsider.id))
+        outsider_page = outsider_client.get("/app/reminders")
+        assert outsider_page.status_code == 200 and contract.current_contract_number not in outsider_page.text
+        admin_client = TestClient(app); admin_client.cookies.set("session", make_session(admin.id))
+        assert contract.current_contract_number in admin_client.get("/app/reminders").text
+    finally: app.dependency_overrides.clear()
 
 
 def test_automatic_completion_only_for_active_states(db):

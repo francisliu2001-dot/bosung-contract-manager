@@ -1,9 +1,18 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.database import get_db
 from app.main import app
 from app.models import AnonymousCode, BusinessType, CodeStatus, FileType, Region, Role, User
 from app.security import hash_password, make_session, verify_password
+
+
+def test_native_picker_progressive_enhancement_is_present():
+    script = (Path(__file__).parents[1] / "app" / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assert "typeof input.showPicker === 'function'" in script
+    assert "input.showPicker()" in script
+    assert "input.focus()" in script
 
 
 def test_contract_ui_create_and_detail(db):
@@ -25,6 +34,8 @@ def test_contract_ui_create_and_detail(db):
         assert form.status_code == 200
         assert "生成正式编号" in form.text
         assert "合同编号预览" in form.text
+        assert 'type="month"' in form.text
+        assert form.text.count('data-picker-label="选择日期"') == 3
 
         created = client.post("/app/contracts/new", data={
             "business_type_id": business.id, "file_type_id": file_type.id,

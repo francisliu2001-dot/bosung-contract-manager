@@ -34,6 +34,32 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
   });
 });
 
+document.querySelectorAll('input[type="date"], input[type="month"]').forEach((input) => {
+  input.classList.add('picker-control');
+  const status = document.querySelector(`[data-picker-value="${input.id}"]`);
+  const updateStatus = () => {
+    if (!status) return;
+    if (!input.value) {
+      status.textContent = input.dataset.pickerLabel || '选择日期';
+    } else if (input.type === 'month') {
+      const [year, monthValue] = input.value.split('-');
+      status.textContent = `${year}年${monthValue}月`;
+    } else {
+      status.textContent = input.value;
+    }
+  };
+  input.addEventListener('click', () => {
+    if (typeof input.showPicker === 'function') {
+      try { input.showPicker(); } catch { input.focus(); }
+    } else {
+      input.focus();
+    }
+  });
+  input.addEventListener('input', updateStatus);
+  input.addEventListener('change', updateStatus);
+  updateStatus();
+});
+
 const createForm = document.getElementById('contract-create-form');
 if (createForm) {
   const business = document.getElementById('business-type');

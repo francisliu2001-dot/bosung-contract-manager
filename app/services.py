@@ -49,7 +49,7 @@ def month_to_yymm(value: str) -> str:
     return value[2:4] + value[5:7]
 
 def yymm_to_month(value: str) -> str:
-    return f"20{value[:2]}-{value[2:]}" if re.fullmatch(r"\d{4}", value or "") else value
+    return f"20{value[:2]}年{value[2:]}月" if re.fullmatch(r"\d{4}", value or "") else value
 
 def parse_custom_region(value: str) -> tuple[str, str]:
     match = re.fullmatch(r"\s*([^\s]+)\s+([A-Za-z]+)\s*", value or "")
@@ -89,17 +89,20 @@ def complete_expired_contracts(db: Session, today: date | None = None) -> int:
     if rows: db.commit()
     return len(rows)
 
-def due_reminders(db: Session, user: User, today: date | None = None):
+def reminder_items(db: Session, user: User, today: date | None = None):
     today = today or datetime.now(timezone.utc).date()
     contracts = db.scalars(visible_contracts(user).where(Contract.service_end_date.is_not(None))).all()
-    reads = {(r.contract_id, r.threshold_days) for r in db.scalars(select(ReminderRead).where(ReminderRead.user_id == user.id)).all()}
+    reads = {(r.contract_id, r.threshold_days): r for r in db.scalars(select(ReminderRead).where(ReminderRead.user_id == user.id)).all()}
     reminders = []
     for contract in contracts:
         days = (contract.service_end_date - today).days
         for threshold in (30, 15, 7):
-            if 0 <= days <= threshold and (contract.id, threshold) not in reads:
-                reminders.append({"contract": contract, "days": days, "threshold": threshold})
+            if 0 <= days <= threshold:
+                reminders.append({"contract": contract, "days": days, "threshold": threshold, "read": reads.get((contract.id, threshold))})
     return sorted(reminders, key=lambda item: (item["days"], item["contract"].id))
+
+def due_reminders(db: Session, user: User, today: date | None = None):
+    return [item for item in reminder_items(db, user, today) if item["read"] is None]
 
 def anonymous_code_stats(db: Session):
     total = db.scalar(select(func.count()).select_from(AnonymousCode)) or 0

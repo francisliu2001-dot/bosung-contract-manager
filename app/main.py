@@ -19,7 +19,7 @@ from .schemas import (CollaborationRequestIn, CollaborationReviewIn, ContractIn,
                       CoreContractUpdate, DictionaryIn, LoginIn, RegionIn, UserIn)
 from .security import hash_password, make_session, read_session, verify_password
 from .services import (anonymous_code_stats, audit, can_access_contract, complete_expired_contracts,
-                       create_contract, due_reminders, get_or_create_region, month_to_yymm,
+                       create_contract, due_reminders, get_or_create_region, month_to_yymm, reminder_items,
                        parse_amount, renumber_contract, request_collaboration, review_collaboration,
                        set_collaborator, visible_contracts, yymm_to_month)
 
@@ -86,6 +86,21 @@ def dashboard(request: Request, session: str | None = Cookie(None), db: Session 
     status_labels = {"draft":"草稿","pending":"待签署","signed":"已签署","active":"履约中","completed":"已完成","terminated":"已终止","void":"已作废"}
     code_stats = anonymous_code_stats(db) if user.role == Role.admin else None
     return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": user, "contracts": rows, "stats": stats, "reminders": reminders, "today": now, "status_labels": status_labels, "code_stats": code_stats})
+
+@app.get("/app/reminders", include_in_schema=False)
+def reminders_page(request: Request, session: str | None = Cookie(None), db: Session = Depends(get_db)):
+    user = html_user(session, db)
+    if not user: return RedirectResponse("/login", status_code=303)
+    items = reminder_items(db, user)
+    contracts_by_id = {item["contract"].id: item["contract"] for item in items}
+    company_ids = [contract.client_company_id for contract in contracts_by_id.values()]
+    owner_ids = [contract.primary_owner_id for contract in contracts_by_id.values()]
+    company_map = {row.id: row.full_name for row in db.scalars(select(ClientCompany).where(ClientCompany.id.in_(company_ids))).all()} if company_ids else {}
+    owner_map = {row.id: row.display_name for row in db.scalars(select(User).where(User.id.in_(owner_ids))).all()} if owner_ids else {}
+    groups = {7: [], 15: [], 30: [], "read": []}
+    for item in items:
+        groups["read" if item["read"] else item["threshold"]].append(item)
+    return templates.TemplateResponse(request=request, name="reminders.html", context={"user":user,"groups":groups,"company_map":company_map,"owner_map":owner_map})
 
 def html_user(session: str | None, db: Session):
     user = db.get(User, read_session(session)) if session else None
@@ -435,7 +450,7 @@ def mark_reminder_read(contract_id: int, threshold_days: int, session: str | Non
     if threshold_days not in {7, 15, 30}: raise HTTPException(422, "invalid reminder threshold")
     if not db.scalar(select(ReminderRead).where(ReminderRead.contract_id == contract.id, ReminderRead.user_id == user.id, ReminderRead.threshold_days == threshold_days)):
         db.add(ReminderRead(contract_id=contract.id, user_id=user.id, threshold_days=threshold_days)); db.commit()
-    return RedirectResponse("/#reminders", status_code=303)
+    return RedirectResponse("/app/reminders", status_code=303)
 
 @app.post("/contracts/{contract_id}/abandon")
 def abandon_contract(contract_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
