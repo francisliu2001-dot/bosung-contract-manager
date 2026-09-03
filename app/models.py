@@ -10,6 +10,8 @@ class Role(str, enum.Enum): admin = "admin"; member = "member"
 class CodeStatus(str, enum.Enum): unused = "unused"; used = "used"; void = "void"
 class ContractStatus(str, enum.Enum):
     draft="draft"; pending="pending"; signed="signed"; active="active"; completed="completed"; terminated="terminated"; void="void"
+class RequestAction(str, enum.Enum): add = "add"; remove = "remove"
+class RequestStatus(str, enum.Enum): pending = "pending"; approved = "approved"; rejected = "rejected"
 
 
 class User(Base):
@@ -88,6 +90,8 @@ class Contract(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class ContractNumberHistory(Base):
@@ -111,6 +115,19 @@ class ContractCollaborator(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class CollaborationRequest(Base):
+    __tablename__ = "collaboration_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id"), index=True)
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    action: Mapped[RequestAction] = mapped_column(Enum(RequestAction))
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[RequestStatus] = mapped_column(Enum(RequestStatus), default=RequestStatus.pending)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -122,4 +139,3 @@ class AuditLog(Base):
     before_json: Mapped[str | None] = mapped_column(Text)
     after_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-

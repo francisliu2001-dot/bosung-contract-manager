@@ -10,3 +10,17 @@ class ContractIn(BaseModel):
     signing_month: str = Field(pattern=r"^\d{4}$"); region_id: int; client_company_name: str
     project_short_name: str; contract_title: str; amount: Decimal | None = None; notes: str | None = None
 
+class ContractUpdate(BaseModel):
+    project_short_name: str | None = None; contract_title: str | None = None
+    amount: Decimal | None = None; notes: str | None = None; status: str | None = None
+
+class CoreContractUpdate(BaseModel):
+    business_type_id: int | None = None; file_type_id: int | None = None
+    primary_owner_id: int | None = None; signing_month: str | None = Field(default=None, pattern=r"^\d{4}$")
+    region_id: int | None = None; reason: str = Field(min_length=1)
+
+class CollaborationRequestIn(BaseModel):
+    action: str = Field(pattern=r"^(add|remove)$"); target_user_id: int
+
+class CollaborationReviewIn(BaseModel):
+    approve: bool

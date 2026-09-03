@@ -1,8 +1,10 @@
 import json
+from datetime import datetime, timezone
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from .models import (AnonymousCode, AuditLog, BusinessType, ClientCompany, CodeStatus,
-                     Contract, ContractCollaborator, ContractNumberHistory, FileType, Region, Role, User)
+                     CollaborationRequest, Contract, ContractCollaborator, ContractNumberHistory,
+                     FileType, Region, RequestAction, RequestStatus, Role, User)
 from .numbering import claim_code, format_number
 
 def visible_contracts(user: User):
@@ -10,6 +12,16 @@ def visible_contracts(user: User):
     if user.role != Role.admin:
         query = query.where(or_(Contract.primary_owner_id == user.id, Contract.id.in_(select(ContractCollaborator.contract_id).where(ContractCollaborator.user_id == user.id))))
     return query
+
+def can_access_contract(db: Session, user: User, contract: Contract, include_deleted: bool = False) -> bool:
+    if contract.is_deleted and not (include_deleted and user.role == Role.admin): return False
+    if user.role == Role.admin or contract.primary_owner_id == user.id: return True
+    return db.get(ContractCollaborator, (contract.id, user.id)) is not None
+
+def audit(db: Session, actor: User, contract: Contract, action: str, before=None, after=None):
+    db.add(AuditLog(actor_id=actor.id, contract_id=contract.id, action=action, entity_type="contract",
+                    entity_id=contract.id, before_json=json.dumps(before, default=str) if before else None,
+                    after_json=json.dumps(after, default=str) if after else None))
 
 def create_contract(db: Session, actor: User, data: dict) -> Contract:
     owner_id = data.get("primary_owner_id") if actor.role == Role.admin else actor.id
@@ -42,3 +54,42 @@ def renumber_contract(db: Session, actor: User, contract: Contract, changes: dic
         old_anonymous_code_id=old_code_id, new_anonymous_code_id=new_code.id, changed_by=actor.id, reason=reason))
     db.commit(); return contract
 
+def request_collaboration(db: Session, actor: User, contract: Contract, action: str, target_user_id: int):
+    if contract.primary_owner_id != actor.id and actor.role != Role.admin: raise PermissionError("primary owner required")
+    target = db.get(User, target_user_id)
+    if not target or not target.is_active: raise ValueError("invalid target user")
+    request = CollaborationRequest(contract_id=contract.id, requested_by=actor.id,
+        action=RequestAction(action), target_user_id=target_user_id)
+    db.add(request); db.flush(); audit(db, actor, contract, "collaboration_requested", after={"request_id": request.id, "action": action, "target_user_id": target_user_id})
+    db.commit(); return request
+
+def review_collaboration(db: Session, actor: User, request: CollaborationRequest, approve: bool):
+    if actor.role != Role.admin: raise PermissionError("admin required")
+    if request.status != RequestStatus.pending: raise ValueError("request already reviewed")
+    contract = db.get(Contract, request.contract_id)
+    if approve:
+        key = (request.contract_id, request.target_user_id)
+        collaborator = db.get(ContractCollaborator, key)
+        if request.action == RequestAction.add and not collaborator:
+            db.add(ContractCollaborator(contract_id=request.contract_id, user_id=request.target_user_id, added_by=actor.id))
+        elif request.action == RequestAction.remove and collaborator:
+            db.delete(collaborator)
+        request.status = RequestStatus.approved
+    else: request.status = RequestStatus.rejected
+    request.reviewed_by = actor.id
+    request.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    audit(db, actor, contract, "collaboration_reviewed", after={"request_id": request.id, "status": request.status.value})
+    db.commit(); return request
+
+def set_collaborator(db: Session, actor: User, contract: Contract, action: str, target_user_id: int):
+    if actor.role != Role.admin: raise PermissionError("admin required")
+    target = db.get(User, target_user_id)
+    if not target or not target.is_active: raise ValueError("invalid target user")
+    collaborator = db.get(ContractCollaborator, (contract.id, target_user_id))
+    if action == "add" and not collaborator:
+        db.add(ContractCollaborator(contract_id=contract.id, user_id=target_user_id, added_by=actor.id))
+    elif action == "remove" and collaborator:
+        db.delete(collaborator)
+    elif action not in {"add", "remove"}: raise ValueError("invalid action")
+    audit(db, actor, contract, "collaborator_changed", after={"action": action, "target_user_id": target_user_id})
+    db.commit()

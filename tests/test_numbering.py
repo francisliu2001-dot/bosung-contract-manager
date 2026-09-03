@@ -1,9 +1,9 @@
 import re
 import pytest
-from app.models import AnonymousCode, BusinessType, CodeStatus, FileType, Region, Role, User
+from app.models import AnonymousCode, BusinessType, CodeStatus, ContractCollaborator, FileType, Region, RequestStatus, Role, User
 from app.numbering import ALPHABET, claim_code, format_number, generate_pool
 from app.security import hash_password
-from app.services import create_contract, renumber_contract
+from app.services import create_contract, renumber_contract, request_collaboration, review_collaboration, visible_contracts
 
 def fixtures(db):
     user=User(username="member", display_name="成员", password_hash=hash_password("password123"), role=Role.member, salesperson_code="TY")
@@ -35,3 +35,16 @@ def test_member_owner_and_admin_renumber(db):
     renumber_contract(db,admin,contract,{"primary_owner_id":admin.id},"更换负责人")
     assert contract.current_contract_number != old and old_code.status == CodeStatus.void
 
+def test_visibility_and_collaboration_approval(db):
+    owner,admin,business,file_type,region=fixtures(db)
+    colleague=User(username="helper", display_name="协作者", password_hash=hash_password("password123"), role=Role.member, salesperson_code="HL")
+    outsider=User(username="outside", display_name="无关成员", password_hash=hash_password("password123"), role=Role.member, salesperson_code="OS")
+    db.add_all([colleague, outsider]); db.commit()
+    data={"business_type_id":business.id,"file_type_id":file_type.id,"signing_month":"2609","region_id":region.id,"client_company_name":"权限测试公司","project_short_name":"项目","contract_title":"合同","amount":None,"notes":None}
+    contract=create_contract(db,owner,data)
+    assert db.scalars(visible_contracts(outsider)).all() == []
+    request=request_collaboration(db,owner,contract,"add",colleague.id)
+    review_collaboration(db,admin,request,True)
+    assert request.status == RequestStatus.approved
+    assert db.get(ContractCollaborator,(contract.id,colleague.id))
+    assert db.scalars(visible_contracts(colleague)).one().id == contract.id
