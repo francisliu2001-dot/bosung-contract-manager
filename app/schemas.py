@@ -1,0 +1,12 @@
+from decimal import Decimal
+from pydantic import BaseModel, Field
+
+class LoginIn(BaseModel): username: str; password: str
+class UserIn(BaseModel): username: str; display_name: str; password: str = Field(min_length=8); salesperson_code: str; role: str = "member"
+class DictionaryIn(BaseModel): code: str; name: str
+class RegionIn(BaseModel): chinese_name: str; code: str
+class ContractIn(BaseModel):
+    business_type_id: int; file_type_id: int; primary_owner_id: int | None = None
+    signing_month: str = Field(pattern=r"^\d{4}$"); region_id: int; client_company_name: str
+    project_short_name: str; contract_title: str; amount: Decimal | None = None; notes: str | None = None
+
