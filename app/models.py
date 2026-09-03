@@ -12,6 +12,7 @@ class ContractStatus(str, enum.Enum):
     draft="draft"; pending="pending"; signed="signed"; active="active"; completed="completed"; terminated="terminated"; void="void"
 class RequestAction(str, enum.Enum): add = "add"; remove = "remove"
 class RequestStatus(str, enum.Enum): pending = "pending"; approved = "approved"; rejected = "rejected"
+class FileCategory(str, enum.Enum): original = "original"; signed = "signed"
 
 
 class User(Base):
@@ -126,6 +127,25 @@ class CollaborationRequest(Base):
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ContractFile(Base):
+    __tablename__ = "contract_files"
+    __table_args__ = (UniqueConstraint("contract_id", "category", "version_name", name="uq_contract_file_version"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id"), index=True)
+    category: Mapped[FileCategory] = mapped_column(Enum(FileCategory))
+    version_name: Mapped[str] = mapped_column(String(100))
+    original_filename: Mapped[str] = mapped_column(String(255))
+    storage_filename: Mapped[str] = mapped_column(String(255), unique=True)
+    storage_path: Mapped[str] = mapped_column(String(500))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int]
+    uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class AuditLog(Base):

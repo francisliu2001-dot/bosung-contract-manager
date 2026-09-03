@@ -1,10 +1,14 @@
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
+from pathlib import Path
+from uuid import uuid4
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .database import get_db
 from datetime import datetime, timezone
 from fastapi import status
-from .models import BusinessType, CollaborationRequest, Contract, ContractStatus, FileType, Region, Role, User
+from .config import get_settings
+from .models import BusinessType, CollaborationRequest, Contract, ContractFile, ContractStatus, FileCategory, FileType, Region, Role, User
 from .schemas import (CollaborationRequestIn, CollaborationReviewIn, ContractIn, ContractUpdate,
                       CoreContractUpdate, DictionaryIn, LoginIn, RegionIn, UserIn)
 from .security import hash_password, make_session, read_session, verify_password
@@ -131,3 +135,62 @@ def change_collaborator(contract_id: int, payload: CollaborationRequestIn, user:
     try: set_collaborator(db, user, row, payload.action, payload.target_user_id)
     except ValueError as exc: db.rollback(); raise HTTPException(422, str(exc))
     return {"ok": True}
+
+@app.post("/contracts/{contract_id}/files", status_code=201)
+async def upload_contract_file(contract_id: int, category: str = Form(...), version_name: str = Form(...),
+                               upload: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    contract = contract_or_404(contract_id, user, db)
+    try: file_category = FileCategory(category)
+    except ValueError: raise HTTPException(422, "category must be original or signed")
+    if Path(upload.filename or "").suffix.lower() != ".pdf" or upload.content_type != "application/pdf": raise HTTPException(415, "PDF files only")
+    content = await upload.read(get_settings().max_upload_mb * 1024 * 1024 + 1)
+    if len(content) > get_settings().max_upload_mb * 1024 * 1024: raise HTTPException(413, "file too large")
+    if not content.startswith(b"%PDF-"): raise HTTPException(415, "invalid PDF header")
+    if db.scalar(select(ContractFile).where(ContractFile.contract_id == contract.id, ContractFile.category == file_category, ContractFile.version_name == version_name)):
+        raise HTTPException(409, "version name already exists for this category")
+    base = Path(get_settings().upload_dir).resolve() / str(contract.id)
+    base.mkdir(parents=True, exist_ok=True)
+    storage_name = f"{uuid4().hex}.pdf"; path = base / storage_name; path.write_bytes(content)
+    row = ContractFile(contract_id=contract.id, category=file_category, version_name=version_name,
+        original_filename=Path(upload.filename).name, storage_filename=storage_name, storage_path=str(path),
+        mime_type="application/pdf", size=len(content), uploaded_by=user.id)
+    db.add(row); db.flush(); audit(db, user, contract, "pdf_uploaded", after={"file_id": row.id, "version": version_name}); db.commit()
+    return {"id": row.id, "version_name": row.version_name}
+
+def contract_file_or_404(file_id: int, user: User, db: Session, include_deleted: bool = False):
+    row = db.get(ContractFile, file_id)
+    if not row: raise HTTPException(404, "file not found")
+    contract = db.get(Contract, row.contract_id)
+    if not can_access_contract(db, user, contract, include_deleted) or (row.is_deleted and not (include_deleted and user.role == Role.admin)):
+        raise HTTPException(404, "file not found")
+    return row, contract
+
+@app.get("/files/{file_id}/download")
+def download_contract_file(file_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    row, _ = contract_file_or_404(file_id, user, db)
+    path = Path(row.storage_path).resolve()
+    upload_root = Path(get_settings().upload_dir).resolve()
+    if upload_root not in path.parents or not path.is_file(): raise HTTPException(404, "stored file not found")
+    return FileResponse(path, media_type="application/pdf", filename=row.original_filename)
+
+@app.delete("/files/{file_id}", status_code=204)
+def delete_contract_file(file_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    row, contract = contract_file_or_404(file_id, user, db)
+    if user.role != Role.admin and row.uploaded_by != user.id: raise HTTPException(403, "only the uploader may delete this file")
+    row.is_deleted, row.deleted_by = True, user.id
+    row.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    audit(db, user, contract, "pdf_deleted", after={"file_id": row.id}); db.commit()
+
+@app.post("/admin/files/{file_id}/restore")
+def restore_contract_file(file_id: int, user: User = Depends(admin), db: Session = Depends(get_db)):
+    row, contract = contract_file_or_404(file_id, user, db, True)
+    row.is_deleted, row.deleted_by, row.deleted_at = False, None, None
+    audit(db, user, contract, "pdf_restored", after={"file_id": row.id}); db.commit(); return {"ok": True}
+
+@app.delete("/admin/files/{file_id}/purge", status_code=204)
+def purge_contract_file(file_id: int, user: User = Depends(admin), db: Session = Depends(get_db)):
+    row, contract = contract_file_or_404(file_id, user, db, True)
+    path = Path(row.storage_path).resolve(); upload_root = Path(get_settings().upload_dir).resolve()
+    if upload_root not in path.parents: raise HTTPException(409, "unsafe storage path")
+    audit(db, user, contract, "pdf_purged", after={"file_id": row.id, "original_filename": row.original_filename}); db.delete(row); db.commit()
+    if path.is_file(): path.unlink()
